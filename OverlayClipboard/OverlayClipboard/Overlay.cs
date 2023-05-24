@@ -66,7 +66,7 @@ namespace OverlayClipboard
         {
             try
             {
-                KeyValuePair<ClipboardContentType, object> clipboardObj = new KeyValuePair<ClipboardContentType, object>();
+                KeyValuePair<ClipboardContentType, object>? clipboardObj = new KeyValuePair<ClipboardContentType, object>();
                 Thread staThread = new Thread(delegate ()
                     {
                         try
@@ -126,8 +126,8 @@ namespace OverlayClipboard
 
             Win32API.POINT p = new Win32API.POINT();
             bool success = Win32API.GetCursorPos(out p);
-            int clipBoardOverlayStartX = p.X;
-            int clipBoardOverlayStartY = p.Y + 20;
+            int clipBoardOverlayStartX = p.X + 20;
+            int clipBoardOverlayStartY = p.Y - 10;
 
             // clipboard
             KeyValuePair<ClipboardContentType, object>? clipboardObj = GetClipboard();
@@ -157,7 +157,12 @@ namespace OverlayClipboard
                     }
 
                     Size size = ogImg.Size;
-                    string imgId = size.ToString();
+                    string imgId = size.ToString() +
+                        ogImg.Flags.ToString() +
+                        ogImg.PixelFormat.ToString() +
+                        ogImg.RawFormat.ToString() +
+                        ogImg.VerticalResolution.ToString() +
+                        ogImg.HorizontalResolution.ToString();
 
                     ogImg = new System.Drawing.Bitmap(ogImg, new Size(Convert.ToInt32(size.Width * 0.1), Convert.ToInt32(size.Height * 0.1)));
 
@@ -197,9 +202,7 @@ namespace OverlayClipboard
             IntPtr hdc = Win32API.GetDC(IntPtr.Zero);
             uint pixel = Win32API.GetPixel(hdc, x, y);
             Win32API.ReleaseDC(IntPtr.Zero, hdc);
-            System.Drawing.Color color = System.Drawing.Color.FromArgb((int)(pixel & 0x000000FF),
-                         (int)(pixel & 0x0000FF00) >> 8,
-                         (int)(pixel & 0x00FF0000) >> 16);
+            System.Drawing.Color color = System.Drawing.Color.FromArgb((int)(pixel & 0x000000FF), (int)(pixel & 0x0000FF00) >> 8, (int)(pixel & 0x00FF0000) >> 16);
             return color;
         }
 
