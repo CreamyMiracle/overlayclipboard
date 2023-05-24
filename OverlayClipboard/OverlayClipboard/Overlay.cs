@@ -2,9 +2,11 @@
 using GameOverlay.Windows;
 using Microsoft.Extensions.Configuration;
 using Microsoft.VisualBasic;
+using Microsoft.VisualBasic.ApplicationServices;
 using Microsoft.VisualBasic.Devices;
 using OverlayClipboard.Hooks;
 using OverlayClipboard.Model;
+using Refit;
 using SharpDX.Direct2D1;
 using System;
 using System.Collections.Concurrent;
@@ -46,6 +48,10 @@ namespace OverlayClipboard
         private readonly int _fontSize;
         private readonly bool _followMouse;
         private readonly DisplayMode _displayMode;
+        private static object _captureLock = new object();
+        private static bool _ocrRunning;
+        private static float _currRotAngle = 0f;
+        private readonly IOCRAPI _ocrApi;
 
         private enum DisplayMode
         {
@@ -56,6 +62,8 @@ namespace OverlayClipboard
 
         public Overlay(IConfiguration config)
         {
+            _ocrApi = RestService.For<IOCRAPI>("https://freeocrapi.com");
+
             _config = config;
 
             Enum.TryParse<DisplayMode>(config["Clipboard:DisplayMode"], out _displayMode);
@@ -233,9 +241,13 @@ namespace OverlayClipboard
 
             if (success)
             {
-                DrawClipboard(gfx, currPos);
-                DrawRightDragArea(gfx, currPos);
-                DrawLeftDragArea(gfx, currPos);
+                lock (_captureLock)
+                {
+                    DrawSpinner(gfx, currPos);
+                    DrawClipboard(gfx, currPos);
+                    DrawRightDragArea(gfx, currPos);
+                    DrawLeftDragArea(gfx, currPos);
+                }
             }
         }
 
@@ -251,7 +263,8 @@ namespace OverlayClipboard
                 int rectRight = !currXSmaller ? currPos.X : rightDragStart.X;
                 int rectBot = !currYSmaller ? currPos.Y : rightDragStart.Y;
 
-                gfx?.DashedRectangle(_rightDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot), 2f);
+                gfx?.DashedRectangle(_rightDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot), 1.0f);
+                gfx?.DrawText(_font, _leftDragAreaBrush, rectLeft, rectTop - _fontSize - 5, "OCR");
             }
         }
 
@@ -267,7 +280,31 @@ namespace OverlayClipboard
                 int rectRight = !currXSmaller ? currPos.X : leftDragStart.X;
                 int rectBot = !currYSmaller ? currPos.Y : leftDragStart.Y;
 
-                gfx?.DashedRectangle(_leftDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot), 2f);
+                gfx?.DashedRectangle(_leftDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot), 1.0f);
+                gfx?.DrawText(_font, _leftDragAreaBrush, rectLeft, rectTop - _fontSize - 5, "Image");
+            }
+        }
+
+        public interface IOCRAPI
+        {
+            [Multipart]
+            [Post("/api")]
+            Task<ApiResponse<OCRResponse>> UploadImage([AliasAs("file")] StreamPart streamPart);
+
+            [Get("/api/get/{uid}")]
+            Task<ApiResponse<object>> GetText(string uid);
+        }
+
+        private void DrawSpinner(GameOverlay.Drawing.Graphics? gfx, CURSORPOS currPos)
+        {
+            if (_ocrRunning)
+            {
+                _currRotAngle += 0.1f;
+                GameOverlay.Drawing.Point point = new GameOverlay.Drawing.Point(currPos.X, currPos.Y);
+                TransformationMatrix transformation = new TransformationMatrix();
+                gfx?.TransformStart(TransformationMatrix.Rotation(_currRotAngle, point));
+                gfx?.DashedCircle(_leftDragAreaBrush, new Circle(point, 10f), 2f);
+                gfx?.TransformEnd();
             }
         }
 
@@ -289,11 +326,11 @@ namespace OverlayClipboard
             {
                 if (clipboardObj.Value.Key == ClipboardContentType.Text)
                 {
-                    gfx.DrawText(_font, mousePixelBrush, clipBoardOverlayStartX, clipBoardOverlayStartY, (string)clipboardObj.Value.Value);
+                    gfx?.DrawText(_font, mousePixelBrush, clipBoardOverlayStartX, clipBoardOverlayStartY, (string)clipboardObj.Value.Value);
                 }
                 else if (clipboardObj.Value.Key == ClipboardContentType.TextNonPasteable)
                 {
-                    gfx.DrawText(_fontItalic, mousePixelBrush, clipBoardOverlayStartX, clipBoardOverlayStartY, (string)clipboardObj.Value.Value);
+                    gfx?.DrawText(_fontItalic, mousePixelBrush, clipBoardOverlayStartX, clipBoardOverlayStartY, (string)clipboardObj.Value.Value);
                 }
                 else if (clipboardObj.Value.Key == ClipboardContentType.Image)
                 {
@@ -312,7 +349,7 @@ namespace OverlayClipboard
                         ogImg.VerticalResolution.ToString() +
                         ogImg.HorizontalResolution.ToString();
 
-                    ogImg = new System.Drawing.Bitmap(ogImg, new Size(Convert.ToInt32(size.Width * 0.1), Convert.ToInt32(size.Height * 0.1)));
+                    //ogImg = new System.Drawing.Bitmap(ogImg, new Size(Convert.ToInt32(size.Width * 0.1), Convert.ToInt32(size.Height * 0.1)));
 
                     if (string.IsNullOrEmpty(_currImg.Key) || _currImg.Key != imgId)
                     {
@@ -323,14 +360,14 @@ namespace OverlayClipboard
                             _currImg = new KeyValuePair<string, byte[]>(imgId, bytes);
 
                             GameOverlay.Drawing.Image overlayImg = new GameOverlay.Drawing.Image(gfx, bytes);
-                            gfx.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _clipboardOpacity);
+                            gfx?.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _clipboardOpacity);
                         }
                     }
                     else if (_currImg.Key == imgId)
                     {
                         var bytes = _currImg.Value;
                         GameOverlay.Drawing.Image overlayImg = new GameOverlay.Drawing.Image(gfx, bytes);
-                        gfx.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _clipboardOpacity);
+                        gfx?.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _clipboardOpacity);
                     }
                 }
             }
@@ -403,7 +440,7 @@ namespace OverlayClipboard
             _kh.Start();
         }
 
-        private void mh_MouseEvent(object sender, MouseEvent me)
+        private async void mh_MouseEvent(object sender, MouseEvent me)
         {
             bool keysDown = AreKeysDown(Constants.DefaultAreaScanDownKeys);
             if (keysDown)
@@ -442,10 +479,32 @@ namespace OverlayClipboard
                     int rectRight = !currXSmaller ? rightDragCompleted.Value.Value.X : rightDragCompleted.Value.Key.X;
                     int rectBot = !currYSmaller ? rightDragCompleted.Value.Value.Y : rightDragCompleted.Value.Key.Y;
 
-                    System.Drawing.Image img = ScreenCapture.Capture(new System.Drawing.Rectangle(rectLeft, rectTop, rectRight - rectLeft, rectBot - rectTop));
+                    System.Drawing.Image img;
+                    lock (_captureLock)
+                    {
+                        _window.Hide();
+                        int width = rectRight - rectLeft;
+                        int height = rectBot - rectTop;
+                        if (width == 0 || height == 0)
+                        {
+                            return;
+                        }
+                        img = ScreenCapture.Capture(new System.Drawing.Rectangle(rectLeft, rectTop, width, height));
+                        _window.Show();
+                    }
 
-                    KeyValuePair<ClipboardContentType, object> clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Image, img);
-                    SetClipboard(clipboardObj);
+                    using (var ms = new MemoryStream())
+                    {
+                        img.Save(ms, System.Drawing.Imaging.ImageFormat.Bmp);
+                        _ocrRunning = true;
+                        var res = await _ocrApi.UploadImage(new StreamPart(new MemoryStream(ms.ToArray()), "ocrImg.bmp", "image/bmp"));
+                        _ocrRunning = false;
+                        if (res.IsSuccessStatusCode)
+                        {
+                            KeyValuePair<ClipboardContentType, object> clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, res.Content.Text);
+                            SetClipboard(clipboardObj);
+                        }
+                    }
                 }
 
                 if (leftDragCompleted != null)
@@ -458,8 +517,19 @@ namespace OverlayClipboard
                     int rectRight = !currXSmaller ? leftDragCompleted.Value.Value.X : leftDragCompleted.Value.Key.X;
                     int rectBot = !currYSmaller ? leftDragCompleted.Value.Value.Y : leftDragCompleted.Value.Key.Y;
 
-                    System.Drawing.Image img = ScreenCapture.Capture(new System.Drawing.Rectangle(rectLeft, rectTop, rectRight - rectLeft, rectBot - rectTop));
-
+                    System.Drawing.Image img;
+                    lock (_captureLock)
+                    {
+                        _window.Hide();
+                        int width = rectRight - rectLeft;
+                        int height = rectBot - rectTop;
+                        if (width == 0 || height == 0)
+                        {
+                            return;
+                        }
+                        img = ScreenCapture.Capture(new System.Drawing.Rectangle(rectLeft, rectTop, width, height));
+                        _window.Show();
+                    }
                     KeyValuePair<ClipboardContentType, object> clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Image, img);
                     SetClipboard(clipboardObj);
                 }

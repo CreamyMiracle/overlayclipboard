@@ -67,3 +67,13 @@ D:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Micro
 D:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.FileSystemGlobbing.dll
 D:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.Primitives.dll
 D:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\appsettings.json
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\appsettings.json
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.Configuration.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.Configuration.Abstractions.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.Configuration.FileExtensions.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.Configuration.Json.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.FileProviders.Abstractions.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.FileProviders.Physical.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.FileSystemGlobbing.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Microsoft.Extensions.Primitives.dll
+F:\Dev\overlayclipboard\OverlayClipboard\OverlayClipboard\bin\Debug\net7.0\Refit.dll
