@@ -13,6 +13,7 @@ namespace OverlayClipboard.Model
         {
 
         }
+
         public MouseEvent(MouseEventFlag type, int x, int y, int delta)
         {
             Type = type;
@@ -21,6 +22,16 @@ namespace OverlayClipboard.Model
             Delta = delta;
             Timestamp = DateTime.UtcNow;
         }
+
+        public MouseEvent(MouseEvent otherEvent)
+        {
+            Type = otherEvent.Type;
+            X = otherEvent.X;
+            Y = otherEvent.Y;
+            Delta = otherEvent.Delta;
+            Timestamp = otherEvent.Timestamp;
+        }
+
         public MouseEventFlag Type { get; set; }
         public int Delta { get; set; }
         public int X { get; set; }

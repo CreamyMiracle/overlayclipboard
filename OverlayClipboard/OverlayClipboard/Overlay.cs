@@ -120,7 +120,7 @@ namespace OverlayClipboard
                                 else if (_displayMode == DisplayMode.Content)
                                 {
                                     clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, Clipboard.GetText());
-                                } 
+                                }
                             }
                             else if (Clipboard.ContainsImage())
                             {
@@ -172,6 +172,38 @@ namespace OverlayClipboard
             }
         }
 
+        private bool SetClipboard(KeyValuePair<ClipboardContentType, object> clipboardObj)
+        {
+            try
+            {
+                Thread staThread = new Thread(delegate ()
+                {
+                    try
+                    {
+                        if (clipboardObj.Key == ClipboardContentType.Text)
+                        {
+                            Clipboard.SetText((string)clipboardObj.Value);
+                        }
+                        else if (clipboardObj.Key == ClipboardContentType.Image)
+                        {
+                            Clipboard.SetImage((System.Drawing.Image)clipboardObj.Value);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                    }
+                });
+                staThread.SetApartmentState(ApartmentState.STA);
+                staThread.Start();
+                staThread.Join();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                return false;
+            }
+        }
+
         private void _window_SetupGraphics(object sender, SetupGraphicsEventArgs e)
         {
             var gfx = e.Graphics;
@@ -180,8 +212,8 @@ namespace OverlayClipboard
             _blackBrush = gfx.CreateSolidBrush(0, 0, 0, _clipboardOpacity);
             _whiteBrush = gfx.CreateSolidBrush(255, 255, 255, _clipboardOpacity);
 
-            _leftDragAreaBrush = gfx.CreateSolidBrush(0, 0, 255, _dragAreaOpacity);
-            _rightDragAreaBrush = gfx.CreateSolidBrush(255, 0, 0, _dragAreaOpacity);
+            _leftDragAreaBrush = gfx.CreateSolidBrush(255, 255, 255, _dragAreaOpacity);
+            _rightDragAreaBrush = gfx.CreateSolidBrush(255, 255, 255, _dragAreaOpacity);
 
             _font = gfx.CreateFont(_fontName, _fontSize);
             _fontItalic = gfx.CreateFont(_fontName, _fontSize, italic: true);
@@ -219,7 +251,7 @@ namespace OverlayClipboard
                 int rectRight = !currXSmaller ? currPos.X : rightDragStart.X;
                 int rectBot = !currYSmaller ? currPos.Y : rightDragStart.Y;
 
-                gfx?.FillRectangle(_rightDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot));
+                gfx?.DashedRectangle(_rightDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot), 2f);
             }
         }
 
@@ -235,7 +267,7 @@ namespace OverlayClipboard
                 int rectRight = !currXSmaller ? currPos.X : leftDragStart.X;
                 int rectBot = !currYSmaller ? currPos.Y : leftDragStart.Y;
 
-                gfx?.FillRectangle(_leftDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot));
+                gfx?.DashedRectangle(_leftDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot), 2f);
             }
         }
 
@@ -397,8 +429,40 @@ namespace OverlayClipboard
                     rightDragEnd = me;
                 }
 
-                bool rightDragCompleted = ValidRightDragCompleted();
-                bool leftDragCompleted = ValidLeftDragCompleted();
+                KeyValuePair<MouseEvent, MouseEvent>? rightDragCompleted = ValidRightDragCompleted();
+                KeyValuePair<MouseEvent, MouseEvent>? leftDragCompleted = ValidLeftDragCompleted();
+
+                if (rightDragCompleted != null)
+                {
+                    bool currXSmaller = rightDragCompleted.Value.Value.X < rightDragCompleted.Value.Key.X;
+                    bool currYSmaller = rightDragCompleted.Value.Value.Y < rightDragCompleted.Value.Key.Y;
+
+                    int rectLeft = currXSmaller ? rightDragCompleted.Value.Value.X : rightDragCompleted.Value.Key.X;
+                    int rectTop = currYSmaller ? rightDragCompleted.Value.Value.Y : rightDragCompleted.Value.Key.Y;
+                    int rectRight = !currXSmaller ? rightDragCompleted.Value.Value.X : rightDragCompleted.Value.Key.X;
+                    int rectBot = !currYSmaller ? rightDragCompleted.Value.Value.Y : rightDragCompleted.Value.Key.Y;
+
+                    System.Drawing.Image img = ScreenCapture.Capture(new System.Drawing.Rectangle(rectLeft, rectTop, rectRight - rectLeft, rectBot - rectTop));
+
+                    KeyValuePair<ClipboardContentType, object> clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Image, img);
+                    SetClipboard(clipboardObj);
+                }
+
+                if (leftDragCompleted != null)
+                {
+                    bool currXSmaller = leftDragCompleted.Value.Value.X < leftDragCompleted.Value.Key.X;
+                    bool currYSmaller = leftDragCompleted.Value.Value.Y < leftDragCompleted.Value.Key.Y;
+
+                    int rectLeft = currXSmaller ? leftDragCompleted.Value.Value.X : leftDragCompleted.Value.Key.X;
+                    int rectTop = currYSmaller ? leftDragCompleted.Value.Value.Y : leftDragCompleted.Value.Key.Y;
+                    int rectRight = !currXSmaller ? leftDragCompleted.Value.Value.X : leftDragCompleted.Value.Key.X;
+                    int rectBot = !currYSmaller ? leftDragCompleted.Value.Value.Y : leftDragCompleted.Value.Key.Y;
+
+                    System.Drawing.Image img = ScreenCapture.Capture(new System.Drawing.Rectangle(rectLeft, rectTop, rectRight - rectLeft, rectBot - rectTop));
+
+                    KeyValuePair<ClipboardContentType, object> clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Image, img);
+                    SetClipboard(clipboardObj);
+                }
 
             }
             else
@@ -410,32 +474,32 @@ namespace OverlayClipboard
             }
         }
 
-        private bool ValidLeftDragCompleted()
+        private KeyValuePair<MouseEvent, MouseEvent>? ValidLeftDragCompleted()
         {
-            bool completed = false;
+            KeyValuePair<MouseEvent, MouseEvent>? completedEvents = null;
             if (leftDragStart != null && leftDragEnd != null && leftDragEnd.Timestamp > leftDragStart.Timestamp)
             {
-                completed = true;
+                completedEvents = new KeyValuePair<MouseEvent, MouseEvent>(new MouseEvent(leftDragStart), new MouseEvent(leftDragEnd));
 
                 leftDragStart = null;
                 leftDragEnd = null;
             }
 
-            return completed;
+            return completedEvents;
         }
 
-        private bool ValidRightDragCompleted()
+        private KeyValuePair<MouseEvent, MouseEvent>? ValidRightDragCompleted()
         {
-            bool completed = false;
+            KeyValuePair<MouseEvent, MouseEvent>? completedEvents = null;
             if (rightDragStart != null && rightDragEnd != null && rightDragEnd.Timestamp > rightDragStart.Timestamp)
             {
-                completed = true;
+                completedEvents = new KeyValuePair<MouseEvent, MouseEvent>(new MouseEvent(rightDragStart), new MouseEvent(rightDragEnd));
 
                 rightDragStart = null;
                 rightDragEnd = null;
             }
 
-            return completed;
+            return completedEvents;
         }
 
         private static void kh_KeyboardEvent(object sender, KeyboardEvent ke)
