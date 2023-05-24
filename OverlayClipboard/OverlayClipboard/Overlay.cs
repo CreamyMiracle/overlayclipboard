@@ -1,10 +1,15 @@
 ﻿using GameOverlay.Drawing;
 using GameOverlay.Windows;
+using Microsoft.Extensions.Configuration;
+using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.Devices;
+using OverlayClipboard.Hooks;
+using OverlayClipboard.Model;
 using SharpDX.Direct2D1;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel.Design;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
@@ -13,24 +18,59 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using static OverlayClipboard.Win32API;
 using static System.Net.Mime.MediaTypeNames;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace OverlayClipboard
 {
-    public class Overlay : IDisposable
+    internal class Overlay : IDisposable
     {
+        private readonly IConfiguration _config;
         private GameOverlay.Drawing.SolidBrush _backgroundBrush;
         private GameOverlay.Drawing.SolidBrush _blackBrush;
         private GameOverlay.Drawing.SolidBrush _whiteBrush;
+        private GameOverlay.Drawing.SolidBrush _leftDragAreaBrush;
+        private GameOverlay.Drawing.SolidBrush _rightDragAreaBrush;
         private GameOverlay.Drawing.Font _font;
         private GameOverlay.Drawing.Font _fontItalic;
         private readonly GraphicsWindow _window;
         private KeyValuePair<string, byte[]> _currImg = new KeyValuePair<string, byte[]>();
-        private readonly float _opacity = 0.35f;
+        private readonly float _clipboardOpacity;
+        private readonly float _dragAreaOpacity;
+        private readonly int _fontColorThreshold;
+        private readonly int _left;
+        private readonly int _top;
+        private readonly int _fps;
+        private readonly string _fontName;
+        private readonly int _fontSize;
+        private readonly bool _followMouse;
+        private readonly DisplayMode _displayMode;
 
-        public Overlay()
+        private enum DisplayMode
         {
+            None,
+            Content,
+            ContentType
+        }
+
+        public Overlay(IConfiguration config)
+        {
+            _config = config;
+
+            Enum.TryParse<DisplayMode>(config["Clipboard:DisplayMode"], out _displayMode);
+            _followMouse = bool.Parse(config["Clipboard:RelativeToMouse"]);
+            _left = int.Parse(_config["Clipboard:OverlayLeft"]);
+            _top = int.Parse(_config["Clipboard:OverlayTop"]);
+            _clipboardOpacity = float.Parse(_config["Clipboard:Opacity"]);
+            _fontColorThreshold = int.Parse(_config["Clipboard:FontColorThreshold"]);
+            _fontSize = int.Parse(_config["Clipboard:FontSize"]);
+            _fontName = _config["Clipboard:FontName"];
+
+            _dragAreaOpacity = float.Parse(_config["ScanArea:Opacity"]);
+
+
+            _fps = int.Parse(_config["OverlayFPS"]);
 
             var gfx = new GameOverlay.Drawing.Graphics()
             {
@@ -44,7 +84,7 @@ namespace OverlayClipboard
 
             _window = new GraphicsWindow(0, 0, totalWidth, maxHeight, gfx)
             {
-                FPS = 40,
+                FPS = _fps,
                 IsTopmost = true,
                 IsVisible = true
             };
@@ -73,20 +113,48 @@ namespace OverlayClipboard
                         {
                             if (Clipboard.ContainsText())
                             {
-                                clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, Clipboard.GetText());
+                                if (_displayMode == DisplayMode.ContentType)
+                                {
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, "Text");
+                                }
+                                else if (_displayMode == DisplayMode.Content)
+                                {
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, Clipboard.GetText());
+                                } 
                             }
                             else if (Clipboard.ContainsImage())
                             {
-                                clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Image, Clipboard.GetImage());
+                                if (_displayMode == DisplayMode.ContentType)
+                                {
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, "Image");
+                                }
+                                else if (_displayMode == DisplayMode.Content)
+                                {
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Image, Clipboard.GetImage());
+                                }
                             }
                             else if (Clipboard.ContainsFileDropList())
                             {
-                                clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.TextNonPasteable, string.Join(Environment.NewLine, Clipboard.GetFileDropList().Cast<string>()));
+                                if (_displayMode == DisplayMode.ContentType)
+                                {
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, "FileDropList");
+                                }
+                                else if (_displayMode == DisplayMode.Content)
+                                {
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.TextNonPasteable, string.Join(Environment.NewLine, Clipboard.GetFileDropList().Cast<string>()));
+                                }
                             }
                             else if (Clipboard.ContainsAudio())
                             {
-                                Stream juu = Clipboard.GetAudioStream();
-                                clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.TextNonPasteable, "Audio");
+                                if (_displayMode == DisplayMode.ContentType)
+                                {
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.Text, "Audio");
+                                }
+                                else if (_displayMode == DisplayMode.Content)
+                                {
+                                    Stream juu = Clipboard.GetAudioStream();
+                                    clipboardObj = new KeyValuePair<ClipboardContentType, object>(ClipboardContentType.TextNonPasteable, "Audio");
+                                }
                             }
                         }
                         catch (Exception ex)
@@ -109,11 +177,14 @@ namespace OverlayClipboard
             var gfx = e.Graphics;
 
             _backgroundBrush = gfx.CreateSolidBrush(0, 0, 0, 0);
-            _blackBrush = gfx.CreateSolidBrush(0, 0, 0, _opacity);
-            _whiteBrush = gfx.CreateSolidBrush(255, 255, 255, _opacity);
+            _blackBrush = gfx.CreateSolidBrush(0, 0, 0, _clipboardOpacity);
+            _whiteBrush = gfx.CreateSolidBrush(255, 255, 255, _clipboardOpacity);
 
-            _font = gfx.CreateFont("Segoe UI", 12);
-            _fontItalic = gfx.CreateFont("Segoe UI", 12, italic: true);
+            _leftDragAreaBrush = gfx.CreateSolidBrush(0, 0, 255, _dragAreaOpacity);
+            _rightDragAreaBrush = gfx.CreateSolidBrush(255, 0, 0, _dragAreaOpacity);
+
+            _font = gfx.CreateFont(_fontName, _fontSize);
+            _fontItalic = gfx.CreateFont(_fontName, _fontSize, italic: true);
         }
 
         private void _window_DestroyGraphics(object sender, DestroyGraphicsEventArgs e)
@@ -122,20 +193,65 @@ namespace OverlayClipboard
 
         private void _window_DrawGraphics(object sender, DrawGraphicsEventArgs e)
         {
-            DateTime now = DateTime.UtcNow;
-
-            Win32API.POINT p = new Win32API.POINT();
-            bool success = Win32API.GetCursorPos(out p);
-            int clipBoardOverlayStartX = p.X + 20;
-            int clipBoardOverlayStartY = p.Y - 10;
-
-            // clipboard
-            KeyValuePair<ClipboardContentType, object>? clipboardObj = GetClipboard();
-            GameOverlay.Drawing.SolidBrush mousePixelBrush = FontColorBasedOnBackground(GetPixelColor(clipBoardOverlayStartX, clipBoardOverlayStartY));
+            Win32API.CURSORPOS currPos = new Win32API.CURSORPOS();
+            bool success = Win32API.GetCursorPos(out currPos);
 
             var gfx = e.Graphics;
             gfx.ClearScene(_backgroundBrush);
 
+            if (success)
+            {
+                DrawClipboard(gfx, currPos);
+                DrawRightDragArea(gfx, currPos);
+                DrawLeftDragArea(gfx, currPos);
+            }
+        }
+
+        private void DrawRightDragArea(GameOverlay.Drawing.Graphics? gfx, CURSORPOS currPos)
+        {
+            if (rightDragStart != null)
+            {
+                bool currXSmaller = currPos.X < rightDragStart.X;
+                bool currYSmaller = currPos.Y < rightDragStart.Y;
+
+                int rectLeft = currXSmaller ? currPos.X : rightDragStart.X;
+                int rectTop = currYSmaller ? currPos.Y : rightDragStart.Y;
+                int rectRight = !currXSmaller ? currPos.X : rightDragStart.X;
+                int rectBot = !currYSmaller ? currPos.Y : rightDragStart.Y;
+
+                gfx?.FillRectangle(_rightDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot));
+            }
+        }
+
+        private void DrawLeftDragArea(GameOverlay.Drawing.Graphics? gfx, CURSORPOS currPos)
+        {
+            if (leftDragStart != null)
+            {
+                bool currXSmaller = currPos.X < leftDragStart.X;
+                bool currYSmaller = currPos.Y < leftDragStart.Y;
+
+                int rectLeft = currXSmaller ? currPos.X : leftDragStart.X;
+                int rectTop = currYSmaller ? currPos.Y : leftDragStart.Y;
+                int rectRight = !currXSmaller ? currPos.X : leftDragStart.X;
+                int rectBot = !currYSmaller ? currPos.Y : leftDragStart.Y;
+
+                gfx?.FillRectangle(_leftDragAreaBrush, new GameOverlay.Drawing.Rectangle(rectLeft, rectTop, rectRight, rectBot));
+            }
+        }
+
+        private void DrawClipboard(GameOverlay.Drawing.Graphics? gfx, CURSORPOS currPos)
+        {
+            if (!_followMouse)
+            {
+                currPos = new Win32API.CURSORPOS();
+            }
+
+            int clipBoardOverlayStartX = currPos.X + _left;
+            int clipBoardOverlayStartY = currPos.Y + _top;
+
+            // clipboard
+            KeyValuePair<ClipboardContentType, object>? clipboardObj = GetClipboard();
+            GameOverlay.Drawing.SolidBrush mousePixelBrush = FontColorBasedOnBackground(GetPixelColor(clipBoardOverlayStartX, clipBoardOverlayStartY));
 
             if (clipboardObj.HasValue && clipboardObj.Value.Key != ClipboardContentType.None)
             {
@@ -175,23 +291,23 @@ namespace OverlayClipboard
                             _currImg = new KeyValuePair<string, byte[]>(imgId, bytes);
 
                             GameOverlay.Drawing.Image overlayImg = new GameOverlay.Drawing.Image(gfx, bytes);
-                            gfx.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _opacity);
+                            gfx.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _clipboardOpacity);
                         }
                     }
                     else if (_currImg.Key == imgId)
                     {
                         var bytes = _currImg.Value;
                         GameOverlay.Drawing.Image overlayImg = new GameOverlay.Drawing.Image(gfx, bytes);
-                        gfx.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _opacity);
+                        gfx.DrawImage(overlayImg, clipBoardOverlayStartX, clipBoardOverlayStartY, _clipboardOpacity);
                     }
                 }
             }
-
         }
 
         private GameOverlay.Drawing.SolidBrush FontColorBasedOnBackground(System.Drawing.Color bg)
         {
-            if (bg.R * 2 + bg.G * 7 + bg.B < 500)
+            int threshold = bg.R * 2 + bg.G * 7 + bg.B;
+            if (threshold < _fontColorThreshold)
                 return _whiteBrush;
             else
                 return _blackBrush;
@@ -206,10 +322,10 @@ namespace OverlayClipboard
             return color;
         }
 
-
-
         public void Run()
         {
+            AttachEventHooks();
+
             _window.Create();
             _window.Join();
         }
@@ -237,6 +353,111 @@ namespace OverlayClipboard
             Dispose(true);
             GC.SuppressFinalize(this);
         }
+        #endregion
+
+        #region Event Stuff
+        private static MouseHook? _mh;
+
+        private static KeyboardHook? _kh;
+
+        private void AttachEventHooks()
+        {
+            _mh = new MouseHook();
+            _mh.SetHook();
+            _mh.MouseEvent += mh_MouseEvent;
+
+            _kh = new KeyboardHook();
+            _kh.KeyboardEvent += kh_KeyboardEvent;
+            _kh.Start();
+        }
+
+        private void mh_MouseEvent(object sender, MouseEvent me)
+        {
+            bool keysDown = AreKeysDown(Constants.DefaultAreaScanDownKeys);
+            if (keysDown)
+            {
+                if (me.Type == MouseEventFlag.LeftDown)
+                {
+                    rightDragStart = null;
+                    leftDragStart = me;
+                }
+                if (me.Type == MouseEventFlag.LeftUp)
+                {
+                    rightDragEnd = null;
+                    leftDragEnd = me;
+                }
+                if (me.Type == MouseEventFlag.RightDown)
+                {
+                    leftDragStart = null;
+                    rightDragStart = me;
+                }
+                if (me.Type == MouseEventFlag.RightUp)
+                {
+                    leftDragEnd = null;
+                    rightDragEnd = me;
+                }
+
+                bool rightDragCompleted = ValidRightDragCompleted();
+                bool leftDragCompleted = ValidLeftDragCompleted();
+
+            }
+            else
+            {
+                rightDragStart = null;
+                rightDragEnd = null;
+                leftDragStart = null;
+                leftDragEnd = null;
+            }
+        }
+
+        private bool ValidLeftDragCompleted()
+        {
+            bool completed = false;
+            if (leftDragStart != null && leftDragEnd != null && leftDragEnd.Timestamp > leftDragStart.Timestamp)
+            {
+                completed = true;
+
+                leftDragStart = null;
+                leftDragEnd = null;
+            }
+
+            return completed;
+        }
+
+        private bool ValidRightDragCompleted()
+        {
+            bool completed = false;
+            if (rightDragStart != null && rightDragEnd != null && rightDragEnd.Timestamp > rightDragStart.Timestamp)
+            {
+                completed = true;
+
+                rightDragStart = null;
+                rightDragEnd = null;
+            }
+
+            return completed;
+        }
+
+        private static void kh_KeyboardEvent(object sender, KeyboardEvent ke)
+        {
+        }
+
+        private static bool AreKeysDown(List<int> vkCodes)
+        {
+            foreach (int quitVk in vkCodes)
+            {
+                if (!((Win32API.GetKeyState(quitVk) & 0x80) == 0x80))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private MouseEvent leftDragStart = null;
+        private MouseEvent leftDragEnd = null;
+        private MouseEvent rightDragStart = null;
+        private MouseEvent rightDragEnd = null;
         #endregion
     }
 }
